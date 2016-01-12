@@ -22,8 +22,11 @@ import java.util.logging.Logger;
 
 public class Socket {
     private static final Logger LOG = Logger.getLogger(Socket.class.getName());
+    private static final String PHOENIX = "phoenix";
+    private static final String HEARTBEAT = "heartbeat";
 
     public static final int RECONNECT_INTERVAL_MS = 5000;
+    public static final int HEARTBEAT_INTERVAL_MS = 10000;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -33,8 +36,10 @@ public class Socket {
     private String endpointUri = null;
     private final List<Channel> channels = new ArrayList<>();
 
-    private Timer timer = null;
+    private final Timer timer;
+    private final Timer heartbeatTimer;
     private TimerTask reconnectTimerTask = null;
+    private TimerTask heartbeatTimerTask;
 
     private Set<ISocketOpenCallback> socketOpenCallbacks = Collections.newSetFromMap(new WeakHashMap<ISocketOpenCallback, Boolean>());
     private Set<ISocketCloseCallback> socketCloseCallbacks = Collections.newSetFromMap(new WeakHashMap<ISocketCloseCallback, Boolean>());
@@ -58,6 +63,8 @@ public class Socket {
             LOG.log(Level.FINE, "WebSocket onOpen: {0}", webSocket);
             Socket.this.webSocket = webSocket;
             cancelReconnectTimer();
+            scheduleHeartbeatTimer();
+
 
             // TODO - Heartbeat
             for (final ISocketOpenCallback callback : socketOpenCallbacks) {
@@ -102,6 +109,7 @@ public class Socket {
             LOG.log(Level.FINE, "WebSocket onClose {0}/{1}", new Object[]{code, reason});
             Socket.this.webSocket = null;
             scheduleReconnectTimer();
+            cancelHeartbeatTimer();
 
             for (final ISocketCloseCallback callback : socketCloseCallbacks) {
                 callback.onClose();
@@ -161,10 +169,38 @@ public class Socket {
         }
     }
 
+    private void scheduleHeartbeatTimer() {
+        cancelHeartbeatTimer();
+
+        Socket.this.heartbeatTimerTask = new TimerTask() {
+            @Override
+            public void run() {
+                LOG.log(Level.FINE, "heartbeatTimerTask run");
+                Envelope envelope = new Envelope(PHOENIX, HEARTBEAT, null, "");
+
+                try {
+                    push(envelope);
+                    webSocket.sendPing(null);
+                } catch (IOException e) {
+                    LOG.log(Level.SEVERE, e.getMessage(), e);
+                }
+            }
+        };
+        heartbeatTimer.scheduleAtFixedRate(heartbeatTimerTask, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS);
+
+    }
+
+    private void cancelHeartbeatTimer(){
+        if (Socket.this.heartbeatTimerTask != null){
+            Socket.this.heartbeatTimerTask.cancel();
+        }
+    }
+
     public Socket(final String endpointUri) throws IOException {
         LOG.log(Level.FINE, "PhoenixSocket({0})", endpointUri);
         this.endpointUri = endpointUri;
         this.timer = new Timer("Reconnect Timer for " + endpointUri);
+        this.heartbeatTimer = new Timer("Heartbeat timer for " + endpointUri);
     }
 
     public void disconnect() throws IOException {
