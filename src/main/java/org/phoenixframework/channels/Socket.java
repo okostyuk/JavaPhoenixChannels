@@ -179,9 +179,11 @@ public class Socket {
                 Envelope envelope = new Envelope(PHOENIX, HEARTBEAT, null, "");
 
                 try {
-                    push(envelope);
-                    webSocket.sendPing(null);
-                } catch (IOException e) {
+                    if (webSocket != null){
+                        push(envelope);
+                        webSocket.sendPing(null);
+                    }
+                } catch (Exception e) {
                     LOG.log(Level.SEVERE, e.getMessage(), e);
                 }
             }
